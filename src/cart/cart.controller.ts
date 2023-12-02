@@ -1,92 +1,86 @@
-import { Controller, Get, Delete, Put, Body, Req, Post, UseGuards, HttpStatus } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpStatus,
+  Param,
+  Post,
+} from '@nestjs/common';
 
-// import { BasicAuthGuard, JwtAuthGuard } from '../auth';
 import { OrderService } from '../order';
-import { AppRequest, getUserIdFromRequest } from '../shared';
-
-import { calculateCartTotal } from './models-rules';
 import { CartService } from './services';
 
 @Controller('api/profile/cart')
 export class CartController {
   constructor(
     private cartService: CartService,
-    private orderService: OrderService
-  ) { }
+    private orderService: OrderService,
+  ) {}
 
-  // @UseGuards(JwtAuthGuard)
-  // @UseGuards(BasicAuthGuard)
-  @Get()
-  findUserCart(@Req() req: AppRequest) {
-    const cart = this.cartService.findOrCreateByUserId(getUserIdFromRequest(req));
+  @Get(':userId')
+  async findUserCart(@Param('userId') userId: string) {
+    const cart = await this.cartService.findUserCart(userId);
 
-    return {
-      statusCode: HttpStatus.OK,
-      message: 'OK',
-      data: { cart, total: calculateCartTotal(cart) },
+    if (!cart) {
+      return {
+        statusCode: HttpStatus.NOT_FOUND,
+        message: 'NOT FOUND. TRY NEW',
+      };
     }
-  }
-
-  // @UseGuards(JwtAuthGuard)
-  // @UseGuards(BasicAuthGuard)
-  @Put()
-  updateUserCart(@Req() req: AppRequest, @Body() body) { // TODO: validate body payload...
-    const cart = this.cartService.updateByUserId(getUserIdFromRequest(req), body)
 
     return {
       statusCode: HttpStatus.OK,
       message: 'OK',
       data: {
         cart,
-        total: calculateCartTotal(cart),
+      },
+    };
+  }
+
+  @Post('checkout/:userId')
+  async checkout(@Param('userId') userId: string, @Body() body) {
+    try {
+      const cart = await this.cartService.findUserCart(userId);
+
+      if (!(cart && cart.items.length)) {
+        return {
+          statusCode: HttpStatus.BAD_REQUEST,
+          message: 'Cart is empty',
+        };
       }
-    }
-  }
 
-  // @UseGuards(JwtAuthGuard)
-  // @UseGuards(BasicAuthGuard)
-  @Delete()
-  clearUserCart(@Req() req: AppRequest) {
-    this.cartService.removeByUserId(getUserIdFromRequest(req));
+      if (!body.payment || !body.delivery || !body.comments) {
+        return {
+          statusCode: HttpStatus.BAD_REQUEST,
+          message: 'Bad data',
+        };
+      }
 
-    return {
-      statusCode: HttpStatus.OK,
-      message: 'OK',
-    }
-  }
+      const { id: cartId, items } = cart;
 
-  // @UseGuards(JwtAuthGuard)
-  // @UseGuards(BasicAuthGuard)
-  @Post('checkout')
-  checkout(@Req() req: AppRequest, @Body() body) {
-    const userId = getUserIdFromRequest(req);
-    const cart = this.cartService.findByUserId(userId);
+      const total = cart.items.reduce((acc, item) => acc + item.count, 0);
 
-    if (!(cart && cart.items.length)) {
-      const statusCode = HttpStatus.BAD_REQUEST;
-      req.statusCode = statusCode
+      const order = await this.orderService.createOrder({
+        ...body,
+        userId,
+        cartId,
+        items,
+        total,
+        status: 'OPEN'
+      });
+
+      await this.cartService.updateCartStatus(cart.id, 'ORDERED');
 
       return {
-        statusCode,
-        message: 'Cart is empty',
-      }
-    }
-
-    const { id: cartId, items } = cart;
-    const total = calculateCartTotal(cart);
-    const order = this.orderService.create({
-      ...body, // TODO: validate and pick only necessary data
-      userId,
-      cartId,
-      items,
-      total,
-    });
-    this.cartService.removeByUserId(userId);
-
-    return {
-      statusCode: HttpStatus.OK,
-      message: 'OK',
-      data: { order }
+        statusCode: HttpStatus.OK,
+        message: 'OK',
+        data: order,
+      };
+    } catch {
+      return {
+        statusCode: HttpStatus.BAD_REQUEST,
+        message: 'BAD_REQUEST',
+      };
     }
   }
 }
