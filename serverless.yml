@@ -1,0 +1,26 @@
+service: serverless-example
+
+plugins:
+  - serverless-offline
+  - serverless-dotenv-plugin
+
+provider:
+  name: aws
+  runtime: nodejs16.x
+  region: us-east-2
+  profile: default
+
+functions:
+  main:
+    handler: dist/main.handler
+    events:
+      - http:
+          method: ANY
+          path: /
+      - http:
+          method: ANY
+          path: '{proxy+}'
+          
+custom:
+  serverless-offline:
+    noPrependStageInUrl: true
